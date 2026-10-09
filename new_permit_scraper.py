@@ -155,16 +155,21 @@ def append_rows(path, rows):
 
 def format_summary(rows, event):
     """Plain-text listing used for both stdout and the email body."""
-    lines = []
+    entries = []
     for r in rows:
-        lines.append(f"{r['permitnum']}  {event['verb']} {r[event['date_field']]}  {r['originaladdress1']}")
-        lines.append(f"    {r['permitclass']} / {r['permittypedesc'] or r['permittypemapped']}: {r['description'][:140]}")
+        lines = [
+            f"{r['permitnum']}  {event['verb']} {r[event['date_field']]}  {r['originaladdress1']}",
+            f"    {r['permitclass']} / {r['permittypedesc'] or r['permittypemapped']}: {r['description'][:140]}",
+        ]
         if event["verb"] == "applied" and r["statuscurrent"]:
             lines.append(f"    Status: {r['statuscurrent']}")
         if r["contractorcompanyname"]:
             lines.append(f"    Contractor: {r['contractorcompanyname']}")
         lines.append(f"    {r['portal_link']}")
-    return "\n".join(lines)
+        entries.append("\n".join(lines))
+    # A blank line after each link, so a mail app can't mistake the next
+    # permit's number (the start of the next line) for more of the link.
+    return "\n\n".join(entries)
 
 
 def smtp_settings():
@@ -186,7 +191,10 @@ def send_email(smtp_cfg, to_addrs, from_addr, rows, today, event):
     msg["Subject"] = f"{len(rows)} {event['heading']} - {today.isoformat()}"
     msg["From"] = from_addr or smtp_cfg["user"] or to_addrs[0]
     msg["To"] = ", ".join(to_addrs)
-    msg.set_content(format_summary(rows, event) + "\n")
+    body = format_summary(rows, event) + "\n"
+    # Send the text unwrapped. Left to choose, Python uses quoted-printable,
+    # which splits every link across two lines in the raw message.
+    msg.set_content(body, cte="7bit" if body.isascii() else "base64")
 
     attachment = io.StringIO()
     write_csv(attachment, rows)
